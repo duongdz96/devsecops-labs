@@ -4,7 +4,7 @@
 .env.defectdojo
 .env.harbor
 
-# Runtime data dirs (Postgres data, SSH host keys, media, valkey dump)
+# Runtime data dirs (Postgres data, SSH host keys, media, valkey dump, Harbor registry data)
 gitlab/config/
 gitlab/data/
 gitlab/logs/
@@ -14,6 +14,17 @@ defectdojo/valkey/
 defectdojo/media/
 dependency-track/postgres/
 dependency-track/apiserver/
+infra/harbor/data/
+infra/harbor/common/
+infra/harbor/docker-compose.yml
+infra/harbor/harbor.v*.tar.gz
+infra/harbor/harbor-offline-installer-*.tgz
+infra/harbor/harbor.yml.tmpl
+infra/harbor/common.sh
+infra/harbor/LICENSE
+infra/harbor/install.sh
+infra/harbor/prepare
+.k3d/
 
 # ci-cd/ is its own git repo (remote: GitLab lab test-cicd-project) - not nested here
 ci-cd/

@@ -1,0 +1,69 @@
+# Harbor local lab configuration.
+# Use with the official Harbor installer. Generated files stay ignored.
+
+hostname: host.docker.internal
+
+http:
+  port: 8083
+
+# HTTPS is disabled for this local lab.
+# Configure Docker Desktop and GitLab DinD to trust this HTTP registry.
+
+harbor_admin_password: Harbor12345
+
+database:
+  password: HarborDB12345
+  max_idle_conns: 100
+  max_open_conns: 900
+  con_max_lifetime: 5m
+  conn_max_idle_time: 0
+
+data_volume: ./data
+
+trivy:
+  ignore_unfixed: false
+  skip_update: false
+  skip_java_db_update: false
+  offline_scan: false
+  security_check: vuln
+  insecure: false
+  timeout: 5m0s
+
+jobservice:
+  max_job_workers: 5
+  job_loggers:
+    - STD_OUTPUT
+    - FILE
+  logger_sweper_duration: 1
+
+notification:
+  webhook_job_max_retry: 3
+  webhook_job_http_client_timeout: 3
+
+log:
+  level: info
+  local:
+    rotate_count: 10
+    rotate_size: 100M
+    location: /var/log/harbor
+
+_version: 2.11.0
+
+proxy:
+  http_proxy:
+  https_proxy:
+  no_proxy:
+  components:
+    - core
+    - jobservice
+    - trivy
+
+upload_purging:
+  enabled: true
+  age: 168h
+  interval: 24h
+  dryrun: false
+
+cache:
+  enabled: false
+  expire_hours: 24

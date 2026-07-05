@@ -1,120 +1,232 @@
 # ArgoCD GitOps Lab Design
 
 Date: 2026-07-05
-Branch: `feature/harbor-argocd-gitops`
 
 ## Goal
 
-Stand up a lightweight Kubernetes cluster (k3d) and ArgoCD, then wire a GitOps loop: GitLab CI builds the `ci-cd` WordPress image, pushes it to Harbor, ArgoCD Image Updater notices the new tag and updates a separate manifest repo, and ArgoCD syncs that repo's manifests to deploy WordPress on the k3d cluster.
+Add a lightweight Kubernetes + GitOps deployment layer after Harbor is working. This phase deploys the WordPress image from Harbor into k3d using ArgoCD and a separate GitLab manifest repository.
 
-This phase depends on Harbor already existing (see `2026-07-05-harbor-registry-design.md`) as the image source ArgoCD Image Updater watches and the cluster pulls from.
+This phase proves:
+
+```text
+Harbor image -> k3d cluster -> ArgoCD sync -> WordPress running in Kubernetes
+```
+
+Image auto-update is intentionally split into a later sub-phase.
+
+## Scope
+
+### Phase 5A — k3d + ArgoCD deploy from Harbor
+
+In scope:
+
+- Create k3d cluster.
+- Configure k3d/containerd to pull from Harbor insecure registry.
+- Install ArgoCD.
+- Create separate GitOps manifest repo.
+- Create Kubernetes manifests for WordPress and its database if needed.
+- Create ArgoCD Application.
+- Sync app and verify WordPress pod/service.
+- Write detailed docs under `docs/argocd/README.md`.
+
+Out of scope for Phase 5A:
+
+- ArgoCD Image Updater.
+- Automatic tag update commits.
+- Ingress controller.
+- TLS certificates.
+- Helm/Kustomize.
+- Production-grade Kubernetes hardening.
+
+### Phase 5B — ArgoCD Image Updater
+
+Deferred until 5A works. Adds:
+
+```text
+Harbor new tag -> Image Updater commits manifest tag -> ArgoCD syncs new image
+```
 
 ## Constraints
 
 - Host has about 8GB RAM and 4 CPU.
-- Build one component at a time; k3d + ArgoCD adds a fifth stack on top of GitLab, Dependency-Track, DefectDojo, and Harbor — do not run all five simultaneously.
-- Work happens on branch `feature/harbor-argocd-gitops`; do not merge into or modify `main`.
+- Build one component at a time.
+- Harbor must already work and contain image `vinfast/wordpress`.
+- GitLab already runs at `http://localhost:8929`.
 - Documentation must be written under `docs/`.
-- Cluster tooling: k3d (k3s running as Docker containers), not Docker Desktop's built-in Kubernetes and not kind.
-- ArgoCD reads from a separate Git repo (not this `Vinfast` repo) containing plain Kubernetes manifests for WordPress.
-- That manifest repo is a new local Git repo, pushed to a new project on the local GitLab lab instance (`http://localhost:8929`).
-- Image tag updates in the manifest repo are automated via ArgoCD Image Updater, not manual edits.
-- Harbor is treated as an insecure (HTTP) registry, consistent with the Harbor design; k3d and ArgoCD Image Updater must both be configured to trust it.
+- Kubernetes tool: k3d, not Docker Desktop Kubernetes and not kind.
+- ArgoCD UI exposed via port-forward on `https://localhost:8084`.
+- Harbor is HTTP/insecure registry at `localhost:8083` from host perspective.
+- k3d nodes must be configured to pull from Harbor via Docker host/network reachable name.
+- Manifest repo is separate from this `Vinfast` repo.
+- Manifest repo is pushed to local GitLab as a new project.
+- Do not require all lab stacks to run simultaneously.
 
 ## Recommended Approach
 
-### Cluster
+Use k3d single-node cluster:
 
-- Use `k3d` to create a single-node lab cluster (1 server, 0 extra agents — keep it minimal for 8GB RAM).
-- Configure k3d's embedded registries config (`k3d registry` / `registries.yaml`) to mark the Harbor host:port as an insecure/plain-HTTP registry so containerd inside k3d nodes can pull from it.
-- No Ingress controller needed for this phase; access ArgoCD UI and the deployed WordPress service via `kubectl port-forward` or a k3d `--port` mapping at cluster-create time.
+```text
+1 server node
+0 agents
+containerd registry config for Harbor
+```
 
-### ArgoCD
+Use official ArgoCD install manifests pinned to a release version rather than `stable`.
 
-- Install ArgoCD into the k3d cluster using the official installation manifests (`kubectl apply -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml` equivalent, pinned to a specific released version rather than `stable` for reproducibility) into namespace `argocd`.
-- Retrieve the initial admin password from the `argocd-initial-admin-secret` Kubernetes secret (documented step, not automated).
-- Expose ArgoCD UI via `kubectl port-forward svc/argocd-server -n argocd 8084:443` (host port `8084`, chosen to avoid collision with Harbor's `8083`).
+Use plain Kubernetes YAML in a separate GitOps repo:
 
-### ArgoCD Image Updater
+```text
+vinfast-gitops/
+  wordpress/
+    namespace.yaml
+    mysql-secret.yaml
+    mysql-deployment.yaml
+    mysql-service.yaml
+    wordpress-deployment.yaml
+    wordpress-service.yaml
+  argocd/
+    application.yaml
+```
 
-- Install ArgoCD Image Updater into the same cluster/namespace via its official manifests.
-- Configure it with:
-  - Pull-registry credentials for Harbor (robot account, insecure/HTTP registry flag).
-  - Write access to the manifest Git repo (SSH deploy key with write permission, generated for this lab and added to the GitLab manifest project).
-  - An `argocd-image-updater.argoproj.io/image-list` annotation on the target ArgoCD Application pointing at `vinfast/wordpress` in Harbor, with update strategy `latest` (or digest-based) so it picks up new pushes.
-- Image Updater commits tag updates directly to the manifest repo's tracked branch; ArgoCD then syncs on the next poll (or auto-sync if enabled).
-
-### Manifest repo
-
-- New local Git repo (e.g. `g:\Cyber security\vinfast-gitops`), containing plain Kubernetes YAML (no Helm/Kustomize for this first pass, to keep it simple):
-  - `wordpress/deployment.yaml` — Deployment referencing `HARBOR_URL/vinfast/wordpress:<tag>`.
-  - `wordpress/service.yaml` — ClusterIP or NodePort Service exposing WordPress.
-  - `wordpress/mysql-deployment.yaml` + `wordpress/mysql-service.yaml` if WordPress needs its own DB in-cluster (existing `ci-cd` Dockerfile/compose to be checked at implementation time for whether DB is bundled or external; if the current WordPress container expects an external DB, a minimal MySQL Deployment is added here since the k3d cluster is a separate environment from the existing `docker-compose` WordPress setup).
-- Pushed to a new GitLab project, e.g. `gitops/vinfast-wordpress`, on the local GitLab instance.
-- An ArgoCD `Application` resource (also stored in this manifest repo or applied directly — decide at plan time) points ArgoCD at this repo/path/branch, targeting the `default` namespace in the k3d cluster, with automated sync enabled.
+Use a static Harbor image tag first, e.g. `latest` or a known pushed commit SHA. Image Updater will be later.
 
 ## Data Flow
 
-1. User creates k3d cluster and installs ArgoCD + Image Updater.
-2. User creates the manifest repo, pushes initial WordPress manifests to a new GitLab project.
-3. User creates an ArgoCD `Application` pointing at that repo/path.
-4. ArgoCD performs initial sync, deploying WordPress (and MySQL if needed) to the k3d cluster.
-5. Later, GitLab CI (from the Harbor phase) builds and pushes a new WordPress image tag to Harbor.
-6. ArgoCD Image Updater polls Harbor, detects the new tag, updates the image reference in the manifest repo, and commits/pushes that change.
-7. ArgoCD detects the new commit and syncs the updated Deployment to the cluster.
-8. User verifies the new pod is running the updated image via `kubectl` or the ArgoCD UI.
+1. Harbor phase builds and pushes `localhost:8083/vinfast/wordpress:<tag>`.
+2. User creates k3d cluster with registry config for Harbor.
+3. User installs ArgoCD into namespace `argocd`.
+4. User creates/pushes GitOps manifest repo to local GitLab.
+5. User applies ArgoCD Application pointing to the manifest repo/path.
+6. ArgoCD syncs manifests into k3d.
+7. k3d pulls WordPress image from Harbor.
+8. User verifies WordPress pod is running.
+9. User verifies WordPress service can be reached via `kubectl port-forward`.
 
-## Documentation
+## Harbor Pull Configuration
 
-Create `docs/argocd/README.md` with:
+k3d cannot use host `localhost:8083` from inside node containers the same way the host can. The docs and implementation must explicitly define the registry address used inside k3d.
 
-- k3d installation/prerequisites and cluster-create command.
-- Insecure-registry config for k3d to reach Harbor.
-- ArgoCD install command (pinned version), namespace, initial admin password retrieval.
-- ArgoCD UI access via port-forward.
-- ArgoCD Image Updater install and configuration (Harbor credentials, Git write credentials, annotation syntax).
-- Manifest repo structure and how it was created/pushed to GitLab.
-- ArgoCD `Application` definition and how to apply it.
-- End-to-end verification steps: trigger a Harbor push, confirm Image Updater commits a manifest change, confirm ArgoCD syncs, confirm the running pod's image tag changed.
-- Teardown commands (`k3d cluster delete`, removing the manifest repo project if desired).
-- 8GB RAM notes — stop other stacks (GitLab, Dependency-Track, DefectDojo, Harbor) as needed when running k3d; k3d itself also consumes RAM even before ArgoCD.
-- Troubleshooting for cluster networking, insecure-registry pulls, and Image Updater Git push failures.
+Expected approach:
+
+- Use host-reachable name `host.docker.internal:8083` so it matches Harbor `hostname` and token realm, or Docker bridge gateway address if needed.
+- Create k3d `registries.yaml` marking Harbor endpoint as plain HTTP/insecure.
+- Use the same image reference in Kubernetes manifests that k3d can resolve.
+- Verify with a manual pull test before ArgoCD sync.
+
+## ArgoCD Setup
+
+- Namespace: `argocd`.
+- Install source: official ArgoCD release manifest pinned to a version.
+- UI access:
+
+```powershell
+kubectl port-forward svc/argocd-server -n argocd 8084:443
+```
+
+- Admin password retrieval:
+
+```powershell
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+
+On Windows PowerShell, docs must include a Windows-compatible decode alternative.
+
+## GitOps Repository
+
+Create a separate local repo, e.g.:
+
+```text
+g:\Cyber security\vinfast-gitops
+```
+
+Push it to local GitLab project, e.g.:
+
+```text
+http://localhost:8929/gitops/vinfast-wordpress.git
+```
+
+The repo contains manifests for WordPress and MySQL.
+
+ArgoCD Application points to:
+
+- repo URL: local GitLab manifest project
+- path: `wordpress`
+- target revision: `main` or configured default branch
+- destination namespace: `vinfast-wordpress`
+- sync policy: automated or manual; for first pass, automated sync with prune/selfHeal is acceptable if documented.
+
+## Documentation Requirements
+
+Create `docs/argocd/README.md` with careful, step-by-step instructions:
+
+1. Prerequisites: k3d, kubectl, Docker, GitLab, Harbor image already pushed.
+2. Resource warning and what services can be stopped.
+3. Verify Harbor image exists.
+4. Create k3d registry config for Harbor insecure registry.
+5. Create k3d cluster.
+6. Verify cluster with `kubectl get nodes`.
+7. Install ArgoCD pinned version.
+8. Wait for ArgoCD pods.
+9. Get ArgoCD admin password on Windows PowerShell.
+10. Port-forward ArgoCD UI.
+11. Create GitOps manifest repo locally.
+12. Create GitLab project and push manifest repo.
+13. Apply ArgoCD Application.
+14. Sync app.
+15. Verify pods/services.
+16. Port-forward WordPress service and open browser.
+17. Teardown cluster.
+18. Troubleshooting:
+    - k3d cannot pull from Harbor
+    - ImagePullBackOff
+    - ArgoCD cannot reach GitLab repo
+    - ArgoCD app OutOfSync/Degraded
+    - port-forward conflicts
+    - low memory
 
 ## Files to Create or Modify
 
-- Create `scripts/k3d-create-cluster.ps1` (or documented inline command) — cluster bootstrap with registries config.
-- Create `docs/argocd/README.md` — install and usage guide.
-- Create manifest repo (outside this repository, at `g:\Cyber security\vinfast-gitops`) containing WordPress/MySQL manifests and the ArgoCD `Application` definition.
-- No changes to `ci-cd/.gitlab-ci.yml` in this phase (the Harbor build/push job from the prior phase is the trigger; no new CI job is required since Image Updater polls Harbor directly).
+- Create `scripts/k3d-create-cluster.ps1` or document equivalent commands.
+- Create `docs/argocd/README.md`.
+- Create external repo `g:\Cyber security\vinfast-gitops` with Kubernetes manifests.
+- No changes to `ci-cd/.gitlab-ci.yml` in Phase 5A.
+- No ArgoCD Image Updater manifests in Phase 5A.
 
 ## Success Criteria
 
-- `k3d cluster list` shows the lab cluster running.
-- ArgoCD UI reachable via port-forward at `https://localhost:8084`, login with admin and the retrieved initial password.
-- ArgoCD Image Updater pod running in namespace `argocd` (or wherever installed) without crash-looping.
-- Manifest repo exists locally, pushed to a new GitLab project on the lab instance.
-- ArgoCD `Application` shows `Synced`/`Healthy` status for the WordPress deployment.
-- WordPress pod(s) reachable inside the cluster (verified via `kubectl port-forward` to the WordPress Service).
-- After a new image is pushed to Harbor, Image Updater commits a tag update to the manifest repo within its poll interval, and ArgoCD subsequently syncs the new tag to the running Deployment — verified by checking the pod's image digest/tag before and after.
-- Documentation under `docs/argocd/README.md` explains install, usage, and the end-to-end verification steps above.
+- `k3d cluster list` shows cluster running.
+- `kubectl get nodes` shows node ready.
+- ArgoCD pods running in namespace `argocd`.
+- ArgoCD UI reachable via `https://localhost:8084` port-forward.
+- Admin login works with retrieved password.
+- GitOps manifest repo exists locally and in local GitLab.
+- ArgoCD Application points at manifest repo/path.
+- ArgoCD Application becomes `Synced` and `Healthy`.
+- WordPress pod runs using image from Harbor.
+- WordPress service reachable via `kubectl port-forward`.
+- `docs/argocd/README.md` explains setup, usage, verification, and teardown.
 
 ## Resource Strategy
 
-Because host has 8GB RAM:
+Because host has about 8GB RAM:
 
-- k3d cluster + ArgoCD + Image Updater is its own resource pool, separate from the Docker Compose stacks.
-- Stop GitLab, Dependency-Track, DefectDojo, and Harbor when not actively testing the full push-to-sync chain; keep only what's needed for the step being tested (e.g. only Harbor + k3d/ArgoCD when testing the Image Updater loop).
-- If the host struggles to run k3d alongside even one other stack, fall back to running k3d cluster with 0 extra agents (already the plan) and consider trimming ArgoCD's default resource requests if pods stay pending.
+- k3d + ArgoCD is its own phase.
+- Run only required stacks:
+  - Harbor must be running for image pulls.
+  - GitLab must be running while creating/pushing manifest repo or if ArgoCD pulls from GitLab.
+  - Dependency-Track and DefectDojo can be stopped during ArgoCD testing.
+- Use 1 k3d server and 0 agents.
+- If pods remain pending or node is pressured, stop other stacks before changing the design.
 
 ## Risks and Mitigations
 
-- k3d nodes need to trust Harbor as an insecure registry, which is a different mechanism from the Docker daemon or DinD insecure-registry config used in the Harbor phase.
-  - Mitigation: document k3d's `registries.yaml` mechanism explicitly and verify with a manual `kubectl run` pulling a Harbor-hosted image before wiring ArgoCD.
-- ArgoCD Image Updater needs write access to the manifest Git repo, meaning a credential (SSH key or token) is stored in-cluster as a Secret.
-  - Mitigation: use a dedicated deploy key scoped to only the manifest repo/project, not a broader GitLab token; document this scoping choice.
-- Existing `ci-cd` WordPress image may assume an external database reachable at a specific host/port (from the Docker Compose environment), which won't exist as-is inside the k3d cluster.
-  - Mitigation: inspect `ci-cd`'s existing Dockerfile/entrypoint at implementation time; add an in-cluster MySQL Deployment and matching environment variables/Service DNS name if required, and document this as a deviation from the Compose-based `ci-cd` setup.
-- Pinning ArgoCD/Image Updater to `stable` manifests can silently pick up breaking version changes over time.
-  - Mitigation: pin to a specific release tag in the install command and record the version in the docs.
-- Running a fifth stack (k3d) on an 8GB host may not leave enough headroom even alone.
-  - Mitigation: docs call out this risk explicitly and recommend closing other heavy applications during this phase; if k3d itself is too heavy, that is a finding to report back rather than something to silently work around.
+- k3d registry networking differs from host Docker and GitLab DinD.
+  - Mitigation: docs include a manual pull test before ArgoCD sync.
+- WordPress may require database configuration different from Docker Compose.
+  - Mitigation: include MySQL Deployment/Service/Secret in GitOps repo.
+- ArgoCD needs GitLab repo access.
+  - Mitigation: use public/internal local project for lab or document credentials if private.
+- Local GitLab may use HTTP and self-hosted URL.
+  - Mitigation: document repo URL exactly and test ArgoCD repo connection.
+- Image Updater adds extra credential complexity.
+  - Mitigation: split it into Phase 5B after 5A works.
