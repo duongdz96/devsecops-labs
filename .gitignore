@@ -1,0 +1,23 @@
+# Secrets - keep real values local only, commit .example templates instead
+.env.gitlab
+.env.dependency-track
+.env.defectdojo
+.env.harbor
+
+# Runtime data dirs (Postgres data, SSH host keys, media, valkey dump)
+gitlab/config/
+gitlab/data/
+gitlab/logs/
+gitlab-runner/config/
+defectdojo/postgres/
+defectdojo/valkey/
+defectdojo/media/
+dependency-track/postgres/
+dependency-track/apiserver/
+
+# ci-cd/ is its own git repo (remote: GitLab lab test-cicd-project) - not nested here
+ci-cd/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
