@@ -27,8 +27,14 @@ infra/harbor/prepare
 .k3d/
 
 # ci-cd/ is its own git repo (remote: GitLab lab test-cicd-project) - not nested here
-ci-cd/
+test_project/
 
 # OS / editor noise
 .DS_Store
 Thumbs.db
+# Claude Code local state
+/.claude/
+
+# Superpowers local execution state
+/.superpowers/
+
