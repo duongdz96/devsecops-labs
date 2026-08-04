@@ -1,7 +1,8 @@
+name: devsecops-labs-gitlab
+
 services:
   gitlab:
     image: ${GITLAB_IMAGE}
-    container_name: vinfast-gitlab
     restart: unless-stopped
     hostname: ${GITLAB_HOSTNAME}
     shm_size: "256m"
@@ -19,20 +20,34 @@ services:
       - "${GITLAB_CONFIG_DIR}:/etc/gitlab"
       - "${GITLAB_LOGS_DIR}:/var/log/gitlab"
       - "${GITLAB_DATA_DIR}:/var/opt/gitlab"
+      # GitLab Workhorse/Rails needs Linux rename/chmod semantics for artifact temp files.
+      - "gitlab-artifacts:/var/opt/gitlab/gitlab-rails/shared/artifacts"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${GITLAB_HTTP_PORT}/users/sign_in >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
     networks:
       - cicd-lab
 
   gitlab-runner:
     image: ${GITLAB_RUNNER_IMAGE}
-    container_name: vinfast-gitlab-runner
     restart: unless-stopped
     depends_on:
-      - gitlab
+      gitlab:
+        condition: service_healthy
     volumes:
       - "${GITLAB_RUNNER_CONFIG_DIR}:/etc/gitlab-runner"
+      # Lab-only Docker executor access. Treat this runner as host-root equivalent.
+      - "/var/run/docker.sock:/var/run/docker.sock"
     networks:
       - cicd-lab
 
+volumes:
+  gitlab-artifacts:
+
 networks:
   cicd-lab:
-    name: vinfast-cicd-lab
+    external: true
+    name: devsecops-labs-cicd

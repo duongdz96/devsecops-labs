@@ -1,7 +1,8 @@
+name: devsecops-labs-dtrack
+
 services:
   dtrack-postgres:
     image: ${DTRACK_POSTGRES_IMAGE}
-    container_name: vinfast-dtrack-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DTRACK_POSTGRES_USER}
@@ -19,7 +20,6 @@ services:
 
   dtrack-apiserver:
     image: ${DTRACK_API_IMAGE}
-    container_name: vinfast-dtrack-apiserver
     restart: unless-stopped
     depends_on:
       dtrack-postgres:
@@ -51,7 +51,6 @@ services:
 
   dtrack-frontend:
     image: ${DTRACK_FRONTEND_IMAGE}
-    container_name: vinfast-dtrack-frontend
     restart: unless-stopped
     depends_on:
       dtrack-apiserver:
@@ -65,4 +64,5 @@ services:
 
 networks:
   cicd-lab:
-    name: vinfast-cicd-lab
+    external: true
+    name: devsecops-labs-cicd

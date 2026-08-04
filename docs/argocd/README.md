@@ -1,105 +1,98 @@
-# ArgoCD GitOps Lab
+# ArgoCD — GitOps trên k3d
 
-ArgoCD adds a lightweight Kubernetes GitOps deployment layer after Harbor works.
+ArgoCD thêm lớp GitOps Kubernetes nhẹ, deploy WordPress từ Harbor lên k3d.
 
-This lab proves:
+Lab này chứng minh:
 
 ```text
-Harbor image -> k3d cluster -> ArgoCD sync -> WordPress running in Kubernetes
+Harbor image (release by digest) -> k3d cluster -> ArgoCD sync -> WordPress running in Kubernetes
 ```
 
-Image auto-update is intentionally deferred. This phase uses a static tag, usually `latest`.
+Image auto-update (ArgoCD Image Updater) cố tình để sau. Phase này dùng image release **tham chiếu theo digest** trong manifest GitOps.
 
-This lab uses:
+## Thông số
 
-- Kubernetes cluster: k3d cluster `vinfast-gitops`
+- Kubernetes cluster: k3d cluster `devsecops-gitops`
 - ArgoCD namespace: `argocd`
 - ArgoCD UI port-forward: `https://localhost:8084`
-- WordPress namespace: `vinfast-wordpress`
-- Harbor image in Kubernetes manifests: `host.docker.internal:8083/vinfast/wordpress:latest`
-- GitOps repo local path: `G:\Cyber security\vinfast-gitops`
-- GitOps repo host push URL: `http://localhost:8929/gitops/vinfast-wordpress.git`
-- GitOps repo URL used by ArgoCD in cluster: `http://host.docker.internal:8929/gitops/vinfast-wordpress.git`
+- WordPress namespace: `devsecops-wordpress`
+- Harbor release image trong manifest: `host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest>`
+- GitOps repo local path: `G:\Cyber security\devsecops-gitops`
+- GitOps repo host push URL: `http://localhost:8929/gitops/devsecops-gitops.git`
+- GitOps repo URL dùng bởi ArgoCD trong cluster: `http://host.docker.internal:8929/gitops/devsecops-gitops.git`
+- App GitLab CI: `test-cicd/test_project`
 
-## Requirements
+## Yêu cầu
 
-- Docker Desktop or Docker Engine.
-- k3d installed and available in `PATH`.
-- kubectl installed and available in `PATH`.
-- Harbor running at `http://localhost:8083`.
-- Harbor project `vinfast` exists.
-- Harbor contains image `vinfast/wordpress:latest` or another tag you put into the manifest.
-- GitLab running at `http://localhost:8929` when creating and syncing the manifest repo.
-- About 8GB RAM and 4 CPU.
+- Docker Desktop hoặc Docker Engine.
+- k3d trong `PATH`.
+- kubectl trong `PATH`.
+- Harbor đang chạy tại `http://localhost:8083`.
+- Harbor project `devsecops-lab` có image `wordpress` (tag digest).
+- GitLab chạy tại `http://localhost:8929` khi tạo + sync manifest repo.
+- ~8GB RAM, 4 CPU.
 
-Do not enable Docker Desktop Kubernetes for this phase. Use k3d.
+Không bật Docker Desktop Kubernetes cho phase này. Dùng k3d.
 
-## Resource Strategy
+## Chiến lược tài nguyên
 
-This host has about 8GB RAM. Run only required services.
+Máy ~8GB RAM, chỉ chạy service cần thiết.
 
-For k3d + ArgoCD testing:
+Test k3d + ArgoCD:
 
-- Harbor must run so Kubernetes can pull the WordPress image.
-- GitLab must run so ArgoCD can fetch the GitOps repo.
-- GitLab Runner is not needed after the image has been pushed.
-- Dependency-Track and DefectDojo can be stopped.
+- Harbor phải chạy để k3d pull được image.
+- GitLab phải chạy để ArgoCD fetch GitOps repo.
+- GitLab Runner không cần sau khi image đã push.
+- Dependency-Track và DefectDojo tắt được.
 
-Stop optional stacks:
+Tắt stack không cần:
 
 ```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml down
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml down
 ```
 
-If memory remains tight, stop GitLab Runner:
+Nếu vẫn căng RAM, tắt runner:
 
 ```powershell
-docker stop vinfast-gitlab-runner
+docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml stop gitlab-runner
 ```
 
-Keep GitLab server running while ArgoCD syncs from GitLab.
+Giữ GitLab server chạy trong khi ArgoCD sync từ GitLab.
 
-## Verify Harbor Image Exists
+## Verify Harbor image tồn tại
 
-On host:
+Pull từ host:
 
 ```powershell
-docker pull localhost:8083/vinfast/wordpress:latest
+docker pull host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest>
 ```
 
-Expected: pull succeeds.
+Expected: pull succeed. Lấy digest immutable từ artifact `release.env` của job `promote-release`; pipeline không phụ thuộc `latest`.
 
-If image is missing, run the Harbor CI pipeline first or build/push manually:
+Nếu thiếu image, chạy pipeline Harbor của `test-cicd/test_project` trước, hoặc build/push tay.
 
-```powershell
-Set-Location .\ci-cd
-docker build -t localhost:8083/vinfast/wordpress:latest .
-docker push localhost:8083/vinfast/wordpress:latest
-Set-Location ..
-```
+## Tạo k3d cluster
 
-## Create k3d Cluster
+Script helper tạo k3d single-node và ghi `.k3d/registries.yaml` cho Harbor HTTP pulls.
 
-The helper script creates a single-node k3d cluster and writes `.k3d/registries.yaml` for Harbor HTTP pulls.
-
-From repo root:
+Từ repo root:
 
 ```powershell
 .\scripts\k3d-create-cluster.ps1
 ```
 
-Script defaults:
+Default của script:
 
 ```text
-Cluster: vinfast-gitops
-Harbor endpoint inside k3d: host.docker.internal:8083
+Cluster: devsecops-gitops
+Harbor endpoint trong k3d: host.docker.internal:8083
 Servers: 1
 Agents: 0
 Traefik: disabled
 ```
 
-Generated registry config:
+Registry config sinh ra:
 
 ```yaml
 mirrors:
@@ -122,73 +115,71 @@ kubectl get nodes
 Expected:
 
 ```text
-vinfast-gitops appears in k3d cluster list
-node status is Ready
+devsecops-gitops xuất hiện trong k3d cluster list
+node status Ready
 ```
 
-## Verify k3d Can Pull From Harbor
+## Verify k3d pull được từ Harbor
 
-Run this before installing ArgoCD app:
+Chạy trước khi cài ArgoCD app:
 
 ```powershell
-docker exec k3d-vinfast-gitops-server-0 crictl pull host.docker.internal:8083/vinfast/wordpress:latest
+docker exec k3d-devsecops-gitops-server-0 crictl pull host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest>
 ```
 
-Expected: pull succeeds.
+Expected: pull succeed.
 
-If this fails, do not continue to ArgoCD yet. Fix Harbor reachability first.
+Nếu fail, chưa sang ArgoCD. Sửa Harbor reachability trước.
 
-### Fallback Harbor Address
+### Fallback Harbor address
 
-If `host.docker.internal:8083` does not work, find Docker bridge gateway:
+Nếu `host.docker.internal:8083` không chạy, tìm Docker bridge gateway:
 
 ```powershell
 docker network inspect bridge --format "{{(index .IPAM.Config 0).Gateway}}"
 ```
 
-Common value:
+Giá trị thường gặp:
 
 ```text
 172.17.0.1
 ```
 
-Then recreate cluster with custom endpoint:
+Recreate cluster với endpoint tùy chỉnh:
 
 ```powershell
-k3d cluster delete vinfast-gitops
+k3d cluster delete devsecops-gitops
 .\scripts\k3d-create-cluster.ps1 -HarborEndpoint "172.17.0.1:8083"
 ```
 
-Also update the image in `G:\Cyber security\vinfast-gitops\wordpress\wordpress-deployment.yaml` to match the same endpoint.
+Đồng bộ image trong `G:\Cyber security\devsecops-gitops\wordpress\wordpress-deployment.yaml` theo cùng endpoint.
 
-## Install ArgoCD
+## Cài ArgoCD
 
-Create namespace:
+Tạo namespace:
 
 ```powershell
 kubectl create namespace argocd
 ```
 
-Install pinned ArgoCD release:
+Cài ArgoCD pinned release:
 
 ```powershell
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.7/manifests/install.yaml
 ```
 
-Wait for pods:
+Chờ pods:
 
 ```powershell
 kubectl -n argocd wait --for=condition=Available deployment --all --timeout=300s
 kubectl -n argocd get pods
 ```
 
-Expected: ArgoCD pods are `Running` or deployments are available.
+Expected: ArgoCD pods `Running` hoặc deployments available.
 
-## Get ArgoCD Admin Password on Windows PowerShell
+## Lấy admin password ArgoCD trên Windows PowerShell
 
-ArgoCD stores initial admin password as base64 in a secret.
-
-PowerShell decode:
+ArgoCD lưu initial admin password dạng base64 trong secret:
 
 ```powershell
 $encoded = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"
@@ -200,71 +191,65 @@ Login:
 
 ```text
 Username: admin
-Password: value printed above
+Password: giá trị in ra ở trên
 ```
 
-## Open ArgoCD UI
+## Mở ArgoCD UI
 
-Start port-forward:
+Port-forward:
 
 ```powershell
 kubectl port-forward svc/argocd-server -n argocd 8084:443
 ```
 
-Open:
+Mở:
 
 ```text
 https://localhost:8084
 ```
 
-Browser will warn about self-signed certificate. Accept it for this local lab.
+Browser sẽ cảnh báo self-signed certificate. Chấp nhận cho lab local này.
 
-## Create GitOps Project in GitLab
+## Tạo GitOps project trong GitLab
 
-In GitLab UI at `http://localhost:8929`:
+GitLab UI `http://localhost:8929`:
 
-1. Login as `root` or lab user.
-2. Create group `gitops` if it does not exist.
-3. Create blank project `vinfast-wordpress` in group `gitops`.
-4. Keep default branch `main`.
-5. For first lab pass, make project public or internal if your GitLab access settings allow it.
+1. Login `root` hoặc lab user.
+2. Tạo group `gitops` nếu chưa có.
+3. Tạo blank project `devsecops-gitops` trong group `gitops`.
+4. Giữ default branch `main`.
+5. Pass đầu tiên: để project public hoặc internal nếu GitLab settings cho phép.
 
-If project is private, configure ArgoCD repository credentials before applying the Application. Public/internal local project avoids credential setup in Phase 5A.
+Nếu project private, phải cấu hình repository credentials trong ArgoCD trước khi apply Application. Project public/internal tránh được bước credentials này.
 
-## Push GitOps Repo
+## Push GitOps repo
 
-Local repo folder already contains manifests:
+Local repo đã chứa manifests:
 
 ```text
-G:\Cyber security\vinfast-gitops
+G:\Cyber security\devsecops-gitops
 ```
 
-Push to GitLab:
+Push lên GitLab:
 
 ```powershell
-Set-Location "G:\Cyber security\vinfast-gitops"
+Set-Location "G:\Cyber security\devsecops-gitops"
 git init
 git branch -M main
 git add .
 git commit -m "Add WordPress GitOps manifests"
-git remote add origin http://localhost:8929/gitops/vinfast-wordpress.git
+git remote add origin http://localhost:8929/gitops/devsecops-gitops.git
 git push -u origin main
 ```
 
-Return to main repo:
-
-```powershell
-Set-Location "G:\Cyber security\Vinfast"
-```
-
-## GitOps Repo Layout
+## Cấu trúc GitOps repo
 
 ```text
-vinfast-gitops/
+devsecops-gitops/
   README.md
   wordpress/
     namespace.yaml
-    mysql-secret.yaml
+    mysql-pvc.yaml
     mysql-deployment.yaml
     mysql-service.yaml
     wordpress-deployment.yaml
@@ -273,63 +258,59 @@ vinfast-gitops/
     application.yaml
 ```
 
-Important image reference:
+Không commit MySQL password plaintext. Lần lab đầu tạo Secret bằng `kubectl`; phase doanh nghiệp chuyển sang SOPS hoặc Sealed Secrets.
+
+Image reference quan trọng:
 
 ```text
-host.docker.internal:8083/vinfast/wordpress:latest
+host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest>
 ```
 
-Important ArgoCD repo URL inside cluster:
+ArgoCD repo URL trong cluster:
 
 ```text
-http://host.docker.internal:8929/gitops/vinfast-wordpress.git
+http://host.docker.internal:8929/gitops/devsecops-gitops.git
 ```
 
-ArgoCD runs inside k3d, so it should not use `localhost:8929` for GitLab. Inside the cluster, `localhost` means the ArgoCD pod, not the host.
+ArgoCD chạy trong k3d, nên không dùng `localhost:8929` cho GitLab. Trong cluster, `localhost` là ArgoCD pod, không phải host.
 
-## Validate Manifests
+## Validate manifests
 
-After cluster exists:
+Sau khi cluster tồn tại:
 
 ```powershell
-kubectl apply --dry-run=client -f "G:\Cyber security\vinfast-gitops\wordpress"
-kubectl apply --dry-run=client -f "G:\Cyber security\vinfast-gitops\argocd\application.yaml"
+kubectl apply --dry-run=client -f "G:\Cyber security\devsecops-gitops\wordpress"
+kubectl apply --dry-run=client -f "G:\Cyber security\devsecops-gitops\argocd\application.yaml"
 ```
 
-Expected: dry-run output with no schema errors.
+Expected: dry-run output, không schema errors.
 
 ## Apply ArgoCD Application
 
-From GitOps repo:
+Từ GitOps repo:
 
 ```powershell
-Set-Location "G:\Cyber security\vinfast-gitops"
+Set-Location "G:\Cyber security\devsecops-gitops"
 kubectl apply -f .\argocd\application.yaml
 ```
 
 Check Application:
 
 ```powershell
-kubectl -n argocd get application vinfast-wordpress
-kubectl -n argocd describe application vinfast-wordpress
+kubectl -n argocd get application devsecops-wordpress
+kubectl -n argocd describe application devsecops-wordpress
 ```
 
-If automated sync works, status should become `Synced` and `Healthy` after resources settle.
+Nếu automated sync chạy, status thành `Synced` + `Healthy` sau khi resources settle.
 
-If you use ArgoCD CLI, optional check:
-
-```powershell
-argocd app get vinfast-wordpress
-```
-
-## Verify WordPress Deployment
+## Verify WordPress deployment
 
 Check namespace resources:
 
 ```powershell
-kubectl -n vinfast-wordpress get pods
-kubectl -n vinfast-wordpress get svc
-kubectl -n vinfast-wordpress describe deployment wordpress
+kubectl -n devsecops-wordpress get pods
+kubectl -n devsecops-wordpress get svc
+kubectl -n devsecops-wordpress describe deployment wordpress
 ```
 
 Expected:
@@ -337,78 +318,75 @@ Expected:
 ```text
 mysql pod Running
 wordpress pod Running
-service/mysql ClusterIP on 3306
-service/wordpress ClusterIP on 80
+service/mysql ClusterIP trên 3306
+service/wordpress ClusterIP trên 80
 ```
 
-Check WordPress image:
+Check image WordPress:
 
 ```powershell
-kubectl -n vinfast-wordpress get deployment wordpress -o jsonpath="{.spec.template.spec.containers[0].image}"
+kubectl -n devsecops-wordpress get deployment wordpress -o jsonpath="{.spec.template.spec.containers[0].image}"
 ```
 
 Expected:
 
 ```text
-host.docker.internal:8083/vinfast/wordpress:latest
+host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest>
 ```
 
 Port-forward WordPress:
 
 ```powershell
-kubectl -n vinfast-wordpress port-forward svc/wordpress 8085:80
+kubectl -n devsecops-wordpress port-forward svc/wordpress 8085:80
 ```
 
-Open:
+Mở:
 
 ```text
 http://localhost:8085
 ```
 
-Expected: WordPress setup/login page loads.
+Expected: trang setup/login WordPress load.
 
-## Update Image Tag Manually
+## Cập nhật image bằng digest mới
 
-Image Updater is out of scope for this phase. To test another tag manually:
+Image Updater ngoài scope. Test digest mới thủ công:
 
-1. Push new image tag to Harbor.
-2. Edit `G:\Cyber security\vinfast-gitops\wordpress\wordpress-deployment.yaml`.
-3. Change image tag.
-4. Commit and push GitOps repo.
-5. ArgoCD syncs the changed manifest.
-
-Example for already-pushed tag `78576de`:
+1. Push image release mới lên Harbor (CI hoặc tay), lấy digest mới.
+2. Sửa `G:\Cyber security\devsecops-gitops\wordpress\wordpress-deployment.yaml`: đổi image reference theo digest.
+3. Commit + push GitOps repo.
+4. ArgoCD sync manifest đã đổi.
 
 ```powershell
-Set-Location "G:\Cyber security\vinfast-gitops"
-(Get-Content .\wordpress\wordpress-deployment.yaml) -replace 'host.docker.internal:8083/vinfast/wordpress:latest', 'host.docker.internal:8083/vinfast/wordpress:78576de' | Set-Content .\wordpress\wordpress-deployment.yaml
+Set-Location "G:\Cyber security\devsecops-gitops"
+# sửa image: thành host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest mới>
 git add .\wordpress\wordpress-deployment.yaml
-git commit -m "Update WordPress image tag"
+git commit -m "Update WordPress image digest"
 git push
 ```
 
 ## Teardown
 
-Delete app resources:
+Xóa app resources:
 
 ```powershell
-kubectl delete -f "G:\Cyber security\vinfast-gitops\argocd\application.yaml"
-kubectl delete namespace vinfast-wordpress
+kubectl delete -f "G:\Cyber security\devsecops-gitops\argocd\application.yaml"
+kubectl delete namespace devsecops-wordpress
 ```
 
-Delete ArgoCD:
+Xóa ArgoCD:
 
 ```powershell
 kubectl delete namespace argocd
 ```
 
-Delete k3d cluster:
+Xóa k3d cluster:
 
 ```powershell
-k3d cluster delete vinfast-gitops
+k3d cluster delete devsecops-gitops
 ```
 
-Stop Harbor and GitLab if done:
+Dừng Harbor + GitLab nếu xong:
 
 ```powershell
 docker compose -f .\infra\harbor\docker-compose.yml down
@@ -417,106 +395,106 @@ docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml down
 
 ## Troubleshooting
 
-### k3d cannot pull from Harbor
+### k3d không pull được từ Harbor
 
-Test from k3d node:
+Test từ k3d node:
 
 ```powershell
-docker exec k3d-vinfast-gitops-server-0 crictl pull host.docker.internal:8083/vinfast/wordpress:latest
+docker exec k3d-devsecops-gitops-server-0 crictl pull host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest>
 ```
 
-If error mentions HTTPS against HTTP registry, registry config was not applied or endpoint differs from image reference.
+Nếu lỗi HTTPS vs HTTP registry, registry config không được áp dụng hoặc endpoint khác image reference.
 
 Fix:
 
-1. Delete cluster.
-2. Recreate with `scripts\k3d-create-cluster.ps1`.
-3. Confirm `.k3d\registries.yaml` contains the same endpoint used in the manifest image.
+1. Xóa cluster.
+2. Recreate với `scripts\k3d-create-cluster.ps1`.
+3. Xác nhận `.k3d\registries.yaml` chứa cùng endpoint dùng trong manifest image.
 
 ### ImagePullBackOff
 
 Check pod events:
 
 ```powershell
-kubectl -n vinfast-wordpress describe pod -l app.kubernetes.io/name=wordpress
+kubectl -n devsecops-wordpress describe pod -l app.kubernetes.io/name=wordpress
 ```
 
-Common causes:
+Nguyên nhân thường gặp:
 
-- Harbor is stopped.
-- Image tag does not exist.
-- k3d registry endpoint does not match image hostname.
-- Docker Desktop insecure registry setting is missing for host-side testing.
-- Harbor project is private and anonymous pull is denied.
+- Harbor đang tắt.
+- Digest không tồn tại trong `devsecops-lab`.
+- k3d registry endpoint không khớp image hostname.
+- Docker Desktop insecure registry thiếu cho host-side test.
+- Harbor project private và pull anonymous bị từ chối.
 
-For private Harbor pulls, create Kubernetes image pull secret in `vinfast-wordpress` and reference it in `wordpress-deployment.yaml`. Phase 5A assumes lab pull is allowed or Harbor is configured so k3d can pull the image.
+Pull private Harbor: tạo Kubernetes image pull secret trong `devsecops-wordpress` và reference trong `wordpress-deployment.yaml`. Phase này giả định lab pull cho phép.
 
-### ArgoCD cannot reach GitLab repo
+### ArgoCD không reach được GitLab repo
 
-ArgoCD runs inside k3d. Do not use this repo URL inside Application:
+ArgoCD chạy trong k3d. Không dùng repo URL này trong Application:
 
 ```text
-http://localhost:8929/gitops/vinfast-wordpress.git
+http://localhost:8929/gitops/devsecops-gitops.git
 ```
 
-Use:
+Dùng:
 
 ```text
-http://host.docker.internal:8929/gitops/vinfast-wordpress.git
+http://host.docker.internal:8929/gitops/devsecops-gitops.git
 ```
 
-Check repo from ArgoCD server pod:
+Test từ ArgoCD server pod:
 
 ```powershell
 kubectl -n argocd exec deploy/argocd-server -- sh -c "wget -S -O- http://host.docker.internal:8929 2>&1 | head"
 ```
 
-If private repo needs auth, add repo credentials in ArgoCD UI under **Settings > Repositories**.
+Nếu repo private, thêm credentials trong ArgoCD UI **Settings > Repositories**.
 
-### ArgoCD app OutOfSync or Degraded
+### ArgoCD app OutOfSync hoặc Degraded
 
 Check Application details:
 
 ```powershell
-kubectl -n argocd describe application vinfast-wordpress
+kubectl -n argocd describe application devsecops-wordpress
 ```
 
 Check managed resources:
 
 ```powershell
-kubectl -n vinfast-wordpress get all
-kubectl -n vinfast-wordpress describe pod -l app.kubernetes.io/name=wordpress
-kubectl -n vinfast-wordpress describe pod -l app.kubernetes.io/name=mysql
+kubectl -n devsecops-wordpress get all
+kubectl -n devsecops-wordpress describe pod -l app.kubernetes.io/name=wordpress
+kubectl -n devsecops-wordpress describe pod -l app.kubernetes.io/name=mysql
 ```
 
-Common causes:
+Nguyên nhân thường gặp:
 
-- MySQL readiness probe still warming up.
-- WordPress image pull failed.
-- GitOps repo has not been pushed to GitLab.
-- Application repo URL points to wrong host.
+- MySQL readiness probe còn warming up.
+- WordPress image pull fail.
+- GitOps repo chưa push lên GitLab.
+- Application repo URL sai host.
 
-### Port-forward conflict
+### Xung đột port-forward
 
-If `8084` is already in use, use another host port:
+`8084` bận, dùng port khác:
 
 ```powershell
 kubectl port-forward svc/argocd-server -n argocd 8094:443
 ```
 
-Open:
+Mở:
 
 ```text
 https://localhost:8094
 ```
 
-If WordPress port `8085` is busy:
+WordPress port `8085` bận:
 
 ```powershell
-kubectl -n vinfast-wordpress port-forward svc/wordpress 8095:80
+kubectl -n devsecops-wordpress port-forward svc/wordpress 8095:80
 ```
 
-Open:
+Mở:
 
 ```text
 http://localhost:8095
@@ -524,12 +502,12 @@ http://localhost:8095
 
 ### Low memory
 
-Symptoms:
+Triệu chứng:
 
-- Pods stay Pending.
-- Node has memory pressure.
-- Docker Desktop becomes slow.
-- GitLab or Harbor restarts.
+- Pod kẹp `Pending`.
+- Node memory pressure.
+- Docker Desktop chậm.
+- GitLab/Harbor restart.
 
 Check:
 
@@ -538,12 +516,12 @@ kubectl describe node
 kubectl get pods -A
 ```
 
-Reduce load:
+Giảm tải:
 
 ```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml down
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml down
-docker stop vinfast-gitlab-runner
+docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml stop gitlab-runner
 ```
 
-If still low, stop GitLab after ArgoCD has synced once only if you no longer need repo access. ArgoCD cannot fetch new commits while GitLab is stopped.
+Nếu vẫn căng, chỉ tắt GitLab sau khi ArgoCD sync thành công lần đầu nếu không cần repo access nữa. ArgoCD không fetch commit mới khi GitLab tắt.

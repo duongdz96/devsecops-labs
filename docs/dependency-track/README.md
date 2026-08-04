@@ -1,164 +1,136 @@
-# Dependency-Track Lab
+# Dependency-Track — SBOM + Fail Gate
 
-Dependency-Track adds SBOM ingestion, component inventory, vulnerability analysis, and CI fail gates to this local CI/CD security lab.
+Dependency-Track nhận SBOM, quét component lỗ hổng, trả về metrics → CI fail gate.
 
-This lab uses:
+Lab này chứng minh:
+
+```text
+GitLab CI -> generate SBOM -> Dependency-Track ingest -> metrics -> FAIL nếu HIGH/CRITICAL
+```
+
+## Thông số
 
 - Dependency-Track API: `http://localhost:8080`
 - Dependency-Track UI: `http://localhost:8081`
-- PostgreSQL: container-only, persistent data under `dependency-track/postgres`
-- GitLab CI target: `ci-cd` WordPress folder
-- Default Dependency-Track project: `vinfast-wordpress`
-- Default Dependency-Track version: `lab`
+- Compose project: `devsecops-labs-dtrack`
+- Docker network: `devsecops-labs-cicd`
+- App GitLab CI: `test-cicd/test_project`
+- Dependency-Track project: `devsecops-wordpress`
+- Version: `lab`
 
-## Requirements
+## Yêu cầu
 
-- Docker Desktop or Docker Engine with Docker Compose plugin.
-- About 8GB RAM and 4 CPU.
-- GitLab already running at `http://localhost:8929`.
-- Ports available on host:
-  - Dependency-Track API: `8080`
-  - Dependency-Track UI: `8081`
+- Docker Desktop + Docker Compose plugin.
+- ~8GB RAM, 4 CPU.
+- GitLab đang chạy tại `http://localhost:8929`.
+- Cổng `8080` (API) và `8081` (UI) trống.
 
-## Environment Configuration
+## Environment configuration
 
-`.env.dependency-track` contains the stack configuration. Key variables:
+`.env.dependency-track` chứa cấu hình stack. Biến quan trọng:
 
-| Variable | Purpose |
+| Biến | Mục đích |
 | --- | --- |
-| `DTRACK_ALPINE_SECRET_KEY` | 64-char hex secret for API key encryption. Must remain stable across restarts. Changing it invalidates all existing API keys. |
-| `DTRACK_API_PORT` | Host port for Dependency-Track API (default `8080`). |
-| `DTRACK_FRONTEND_PORT` | Host port for Dependency-Track UI (default `8081`). |
-| `DTRACK_POSTGRES_PASSWORD` | PostgreSQL password for the `dtrack` database. |
+| `DTRACK_ALPINE_SECRET_KEY` | 64-char hex, mã hóa API key. Phải giữ ổn định sau boot đầu. Đổi = mất key. |
+| `DTRACK_API_PORT` | Cổng host API (mặc định `8080`). |
+| `DTRACK_FRONTEND_PORT` | Cổng host UI (mặc định `8081`). |
+| `DTRACK_POSTGRES_PASSWORD` | Password PostgreSQL cho DB `dtrack`. |
 
-CORS is restricted to `http://localhost:${DTRACK_FRONTEND_PORT}` (the frontend origin). Wildcard `*` is not used.
+CORS chỉ cho phép origin `http://localhost:${DTRACK_FRONTEND_PORT}`. Không dùng wildcard `*`.
 
 ## Start Dependency-Track
-
-From repository root:
 
 ```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml up -d
 ```
 
-Check status:
+Check:
 
 ```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml ps
-```
-
-Follow API logs:
-
-```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml logs -f dtrack-apiserver
 ```
 
-First boot can take several minutes. Vulnerability intelligence sync can take longer after first login.
+Boot đầu mất vài phút. Vulnerability intelligence sync có lâu hơn sau lần login đầu.
 
 ## Login
 
-Open UI:
-
-```text
-http://localhost:8081
-```
-
-Default credentials:
+UI: `http://localhost:8081`
 
 ```text
 Username: admin
 Password: admin
 ```
 
-Change admin password immediately after first login.
+Đổi password admin ngay sau lần login đầu.
 
-## Create API Key
+## Tạo API Key
 
-In Dependency-Track UI:
+1. **Administration → Access Management → Teams**.
+2. Chọn team CI hoặc tạo mới.
+3. Thêm quyền BOM upload + project access.
+4. Generate API key → copy.
 
-1. Open **Administration > Access Management > Teams**.
-2. Select team used for automation, or create a CI team.
-3. Add permissions needed for BOM upload and project access.
-4. Generate API key.
-5. Copy API key.
+Lưu API key chỉ trong GitLab CI/CD variables, không commit.
 
-Store API key only in GitLab CI/CD variables. Do not commit API keys into repo files.
+## GitLab CI variables
 
-## GitLab CI Variables
-
-In GitLab project for `ci-cd`, open **Settings > CI/CD > Variables** and add:
+Trong project `test-cicd/test_project`, **Settings > CI/CD > Variables**:
 
 | Variable | Value |
 | --- | --- |
 | `DTRACK_API_URL` | `http://host.docker.internal:8080` |
-| `DTRACK_API_KEY` | API key from Dependency-Track |
-| `DTRACK_PROJECT_NAME` | `vinfast-wordpress` |
+| `DTRACK_API_KEY` | API key từ Dependency-Track |
+| `DTRACK_PROJECT_NAME` | `devsecops-wordpress` |
 | `DTRACK_PROJECT_VERSION` | `lab` |
 | `DTRACK_FAIL_ON_SEVERITY` | `HIGH` |
 
-Use `http://host.docker.internal:8080` on Docker Desktop so GitLab Runner job containers can reach the host-published API port.
+Dùng `host.docker.internal:8080` trên Docker Desktop để runner job container reach được cổng host-published.
 
-If runner job containers are attached to Docker network `vinfast-cicd-lab`, `DTRACK_API_URL` may be set to:
+Nếu runner job container nằm trên Docker network `devsecops-labs-cicd`, có thể dùng service name:
 
 ```text
 http://dtrack-apiserver:8080
 ```
 
-## CI Behavior
+## Hành vi CI
 
-File `ci-cd/.gitlab-ci.yml` runs job `dependency-track-sbom`.
+`.gitlab-ci.yml` có job `dependency-track-sbom`:
 
-Job behavior:
+1. Cài Syft trong Alpine CI container.
+2. Tạo CycloneDX JSON SBOM: `gl-sbom.cdx.json`.
+3. Upload lên Dependency-Track: `POST /api/v1/bom?autoCreate=true`.
+4. Project `devsecops-wordpress` version `lab` tự tạo nếu chưa có.
+5. Poll BOM processing token → chờ finish hoặc timeout.
+6. Lookup project UUID.
+7. Query project metrics.
+8. FAIL nếu `critical > 0`.
+9. FAIL nếu `DTRACK_FAIL_ON_SEVERITY=HIGH` và `high > 0`.
+10. Lưu `gl-sbom.cdx.json` artifact 7 ngày.
 
-1. Installs Syft in an Alpine CI container.
-2. Generates CycloneDX JSON SBOM:
+## Fail gate
 
-   ```text
-   gl-sbom.cdx.json
-   ```
+Threshold mặc định: `HIGH`.
 
-3. Uploads SBOM to Dependency-Track endpoint:
-
-   ```text
-   POST /api/v1/bom
-   ```
-
-4. Uses `autoCreate=true` so project `vinfast-wordpress` version `lab` is created if missing.
-5. Polls BOM processing token until processing finishes or timeout occurs.
-6. Looks up project UUID.
-7. Queries current project metrics.
-8. Fails pipeline if `critical > 0`.
-9. Fails pipeline if `DTRACK_FAIL_ON_SEVERITY=HIGH` and `high > 0`.
-10. Saves `gl-sbom.cdx.json` as pipeline artifact for 7 days.
-
-## Fail Gate
-
-Default gate threshold is `HIGH`.
-
-Pipeline fails when Dependency-Track reports any:
+Pipeline fail khi Dependency-Track báo:
 
 - `CRITICAL` vulnerable component
 - `HIGH` vulnerable component
 
-Pipeline passes only when:
+Pipeline pass chỉ khi:
 
-- SBOM generation succeeds
-- SBOM upload succeeds
-- BOM processing finishes before timeout
-- project metrics are readable
-- no `HIGH` or `CRITICAL` vulnerable components are reported
+- SBOM generation/upload succeed
+- BOM processing finish trước timeout
+- project metrics đọc được
+- không có `HIGH`/`CRITICAL`
 
-To fail only on `CRITICAL`, set GitLab CI variable:
+Giảm xuống `CRITICAL` only (lab troubleshooting):
 
 ```text
 DTRACK_FAIL_ON_SEVERITY=CRITICAL
 ```
 
-Use this only when deliberately lowering enforcement for lab troubleshooting.
-
-## Verify Locally
-
-Validate Compose config:
+## Verify locally
 
 ```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml config
@@ -170,93 +142,72 @@ Check API:
 Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8080/api/version"
 ```
 
-Check UI:
+Check UI: `http://localhost:8081`
 
-```powershell
-Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8081"
-```
+Expected: API trả HTTP 200, UI trả HTTP 200, browser mở được.
 
-Expected:
+## Verify từ GitLab CI
 
-- API request returns HTTP 200.
-- UI request returns HTTP 200.
-- Browser can open `http://localhost:8081`.
-
-## Verify from GitLab CI
-
-1. Push or copy `ci-cd/.gitlab-ci.yml` into GitLab project for `ci-cd`.
-2. Configure GitLab CI variables listed above.
+1. Commit `.gitlab-ci.yml` vào `test-cicd/test_project`.
+2. Config CI variables.
 3. Run pipeline.
-4. Confirm job creates artifact `gl-sbom.cdx.json`.
-5. Open Dependency-Track UI.
-6. Open project `vinfast-wordpress` version `lab`.
-7. Confirm components appear.
-8. Confirm pipeline gate result matches Dependency-Track `HIGH` and `CRITICAL` metrics.
+4. Xác nhận artifact `gl-sbom.cdx.json` tồn tại.
+5. Mở Dependency-Track UI → project `devsecops-wordpress` version `lab`.
+6. Confirm components xuất hiện.
+7. Confirm gate result khớp metrics `HIGH`/`CRITICAL`.
 
 ## Stop Dependency-Track
 
-Stop containers but keep data:
+Giữ dữ liệu:
 
 ```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml down
 ```
 
-Delete all Dependency-Track data:
+Xóa hết:
 
 ```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml down
 Remove-Item -Recurse -Force .\dependency-track
 ```
 
-## Resource Notes
+## Ghi chú tài nguyên
 
-This host has about 8GB RAM. Keep Dependency-Track separate from GitLab so it can be stopped when not scanning.
+~8GB RAM. Dependency-Track tách khỏi GitLab để có thể tắt khi không scan.
 
-If memory pressure appears:
+If memory căng:
 
-1. Stop unused services.
-2. Start only GitLab and Dependency-Track for SBOM testing.
-3. Avoid running Harbor, ArgoCD, DefectDojo, and Dependency-Track all at once until host resources are increased.
+1. Stop stack không dùng.
+2. Chạy GitLab + Dependency-Track chỉ cho SBOM test.
+3. Không chạy Harbor + ArgoCD + DefectDojo + Dependency-Track đồng loạt.
 
 ## Troubleshooting
 
-### UI cannot reach API
-
-Check API is reachable from host:
+### UI không reach API
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8080/api/version"
-```
-
-If API is not ready, follow logs:
-
-```powershell
 docker compose --env-file .env.dependency-track -f docker-compose.dependency-track.yml logs -f dtrack-apiserver
 ```
 
-### GitLab CI cannot reach Dependency-Track
+### GitLab CI không reach Dependency-Track
 
-Use this GitLab CI variable on Docker Desktop:
+Docker Desktop:
 
 ```text
 DTRACK_API_URL=http://host.docker.internal:8080
 ```
 
-If using shared Docker network access, attach runner job containers to `vinfast-cicd-lab` and use:
+Shared network:
 
 ```text
 DTRACK_API_URL=http://dtrack-apiserver:8080
 ```
 
-### Pipeline fails on HIGH or CRITICAL findings
+### Pipeline fail vì HIGH/CRITICAL
 
-Open Dependency-Track UI:
-
-1. Open project `vinfast-wordpress`.
-2. Open version `lab`.
-3. Review vulnerabilities.
-4. Fix vulnerable components or suppress findings only if verified false positive.
+Mở Dependency-Track UI → project `devsecops-wordpress` → version `lab` → review vulnerabilities. Fix component hoặc suppress nếu verified false positive.
 
 ### BOM processing timeout
 
-Dependency-Track may still be processing or syncing vulnerability data. Re-run pipeline after API is stable. Timeout fails closed so missing scan data is not treated as pass.
+Dependency-Track có thể vẫn đang sync vulnerability data. Re-run pipeline sau khi API stable. Timeout fail closed — không treat missing data as pass.

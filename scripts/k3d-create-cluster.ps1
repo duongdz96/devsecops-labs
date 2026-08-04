@@ -1,5 +1,5 @@
 param(
-  [string]$ClusterName = "vinfast-gitops",
+  [string]$ClusterName = "devsecops-gitops",
   [string]$HarborEndpoint = "host.docker.internal:8083"
 )
 
@@ -56,4 +56,4 @@ kubectl get nodes
 
 Write-Host ""
 Write-Host "Manual Harbor pull test after image exists:"
-Write-Host "docker exec k3d-$ClusterName-server-0 crictl pull $HarborEndpoint/vinfast/wordpress:latest"
+Write-Host "docker exec k3d-$ClusterName-server-0 crictl pull $HarborEndpoint/devsecops-lab/wordpress@sha256:<digest>"

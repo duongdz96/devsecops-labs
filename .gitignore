@@ -14,19 +14,20 @@ defectdojo/valkey/
 defectdojo/media/
 dependency-track/postgres/
 dependency-track/apiserver/
+infra/harbor/harbor.yml
 infra/harbor/data/
 infra/harbor/common/
+infra/harbor/security/
 infra/harbor/docker-compose.yml
 infra/harbor/harbor.v*.tar.gz
 infra/harbor/harbor-offline-installer-*.tgz
-infra/harbor/harbor.yml.tmpl
 infra/harbor/common.sh
 infra/harbor/LICENSE
 infra/harbor/install.sh
 infra/harbor/prepare
 .k3d/
 
-# ci-cd/ is its own git repo (remote: GitLab lab test-cicd-project) - not nested here
+# test_project/ becomes its own GitLab repo after clean bootstrap - never nest it here
 test_project/
 
 # OS / editor noise
@@ -35,6 +36,8 @@ Thumbs.db
 # Claude Code local state
 /.claude/
 
-# Superpowers local execution state
+# Superpowers local execution state (docs/superpowers remains tracked)
 /.superpowers/
-superpowers/
+
+# Local reset snapshots; never source-of-truth
+/backup/

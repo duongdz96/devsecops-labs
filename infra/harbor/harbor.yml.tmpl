@@ -2,25 +2,25 @@
 # Generate infra/harbor/harbor.yml with scripts/New-HarborConfig.ps1.
 # Do not pass this template directly to Harbor prepare/install.
 
-hostname: 'host.docker.internal'
+hostname: '__HARBOR_HOSTNAME__'
 
 http:
-  port: 8083
+  port: __HARBOR_HTTP_PORT__
 
 # HTTPS is intentionally disabled for this local-only lab.
 # Docker Desktop, GitLab DinD, and k3d must explicitly trust this HTTP registry.
 
-harbor_admin_password: 'nhepq0XmdQcTRxKqkoR4bKknhygaaBNRCbeXFFTxb1k'
+harbor_admin_password: '__HARBOR_ADMIN_PASSWORD__'
 
 database:
-  password: 'SBgJVYmd8bIrKj1CFQkyP6rdsMps1rfMILa9eqnl8w4'
+  password: '__HARBOR_DB_PASSWORD__'
   max_idle_conns: 100
   max_open_conns: 900
   conn_max_lifetime: 5m
   conn_max_idle_time: 0
 
 # Must resolve to an absolute Linux path in the WSL runtime.
-data_volume: /home/duongnb/devsecops-harbor/data
+data_volume: __HARBOR_DATA_DIR__
 
 trivy:
   ignore_unfixed: false

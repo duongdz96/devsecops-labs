@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devsecops-wordpress
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://host.docker.internal:8929/gitops/devsecops-gitops.git
+    targetRevision: main
+    path: wordpress
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-wordpress
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

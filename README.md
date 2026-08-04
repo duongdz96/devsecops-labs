@@ -1,117 +1,79 @@
-# Vinfast CI/CD Security Lab
+# DevSecOps-Labs
 
-Local lab for building a CI/CD security workflow. Phase 1 runs GitLab CE and GitLab Runner with Docker-in-Docker support.
+Local lab học GitOps + DevSecOps: GitLab CI/CD → Harbor registry → quét SBOM/SAST → tổng hợp lỗ hổng → ArgoCD deploy WordPress lên k3d.
 
-## Requirements
-
-- Docker Desktop or Docker Engine with Docker Compose plugin.
-- About 8GB RAM and 4 CPU.
-- Ports available on host:
-  - GitLab HTTP: `8929`
-  - GitLab SSH: `2224`
-
-## Phase 1 Services
-
-- GitLab CE: `http://localhost:8929`
-- GitLab SSH: `ssh://git@localhost:2224/...`
-- GitLab Runner: Docker executor, privileged mode enabled, default image `docker:24`
-
-## Start GitLab
-
-```powershell
-docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml up -d gitlab
-```
-
-GitLab first boot can take 5-15 minutes on an 8GB RAM host.
-
-Check status:
-
-```powershell
-docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml ps
-docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml logs -f gitlab
-```
-
-Open:
+## Kiến trúc
 
 ```text
-http://localhost:8929
+GitLab CI (build) -> Harbor (registry) -> k3d + ArgoCD (GitOps deploy)
+       \-> Dependency-Track (SBOM)  -> fail gate
+       \-> DefectDojo (aggregation) -> fail gate
 ```
 
-## Get Initial Root Password
+Sáu thành phần chạy trên máy 8GB RAM này. Mỗi phase bật một phần, không chạy đồng loạt.
+
+| Layer | Compose project | Cổng | Docs |
+| --- | --- | --- | --- |
+| GitLab CE + Runner | `devsecops-labs-gitlab` | HTTP `8929`, SSH `3224` | - |
+| Harbor registry | installer riêng (không trong compose chính) | `8083` | `docs/harbor/README.md` |
+| Dependency-Track | `devsecops-labs-dtrack` | API `8080`, UI `8081` | `docs/dependency-track/README.md` |
+| DefectDojo | `devsecops-labs-dojo` | `8082` | `docs/defectdojo/README.md` |
+| k3d + ArgoCD | cluster `devsecops-gitops` | ArgoCD `8084`, WordPress `8085` | `docs/argocd/README.md` |
+| Clean rebuild | - | - | `docs/clean-rebuild/README.md` |
+
+## Tên chuẩn (bắt buộc khớp)
+
+Lab dùng một bộ tên thống nhất. Đừng đổi tên tùy ý; mọi docs/script/compose đều tham chiếu đúng tên này.
+
+| Vai trò | Tên |
+| --- | --- |
+| Mạng Docker chung (external) | `devsecops-labs-cicd` |
+| Compose project GitLab | `devsecops-labs-gitlab` |
+| Compose project Dependency-Track | `devsecops-labs-dtrack` |
+| Compose project DefectDojo | `devsecops-labs-dojo` |
+| GitLab group + project app | `test-cicd` / `test_project` |
+| GitLab SSH port | `3224` |
+| Dependency-Track project | `devsecops-wordpress` |
+| DefectDojo product | `devsecops-wordpress` |
+| Harbor project (candidate) | `devsecops-candidate` |
+| Harbor project (release) | `devsecops-lab` |
+| k3d cluster + tên GitOps | `devsecops-gitops` |
+
+App nim `test_project` là repo Git độc lập, nested trong đây nhưng bị `.gitignore` chặn, nên không bao giờ bị parent repo track hay commit. Vào GitLab nó nằm ở `test-cicd/test_project`.
+
+## Mẫu → runtime: bảo vệ secret
+
+Thiết kế secret theo mẫu "template track bằng git, runtime giá trị thật gitignored":
+
+- File `*.example` (vd `.env.gitlab.example`) là **template**, có git, chỉ chứa placeholder.
+- File runtime (`.env.gitlab`, `.env.harbor`, ...) là **gitignored**, chứa giá trị thật — không bao giờ commit.
+- `infra/harbor/harbor.yml.tmpl` là template có git; `infra/harbor/harbor.yml` là runtime gitignored.
+
+Lần đầu khởi tạo secrets và config:
 
 ```powershell
-.\scripts\gitlab-show-root-password.ps1
+.\scripts\New-LabSecrets.ps1
+.\scripts\New-HarborConfig.ps1
+.\scripts\Test-LabConfig.ps1
 ```
 
-Login:
+- `New-LabSecrets.ps1` sinh mật khẩu ngẫu nhiên cho cả 4 env stack, render từ template `.example` → runtime `.env.*`.
+- `New-HarborConfig.ps1` đọc `.env.harbor`, render `infra/harbor/harbor.yml` từ `harbor.yml.tmpl`, chặn mọi `CHANGE_ME`/kí tự nguy hiểm.
+- `Test-LabConfig.ps1` preflight: kiểm tra docker, env files không còn `CHANGE_ME`, compose render đúng project name `devsecops-labs-*` + network `devsecops-labs-cicd`, cổng trống, tool k3d/kubectl/wsl (phase `gitops`).
 
-- Username: `root`
-- Password: output from script
+Giữ giá trị ổn định **sau lần boot đầu**: đổi `DTRACK_ALPINE_SECRET_KEY` hoặc `DD_SECRET_KEY` / `DD_CREDENTIAL_AES_256_KEY` sau khi có dữ liệu sẽ làm API key / credential đã mã hóa đọc không được. Chỉ đổi khi rebuild sạch theo runbook.
 
-If password is empty, GitLab already removed the initial password. Reset it manually inside the container.
+## Các phase
 
-## Start Runner Container
+1. [Harbor registry](docs/harbor/README.md)
+2. [Dependency-Track — SBOM + fail gate](docs/dependency-track/README.md)
+3. [DefectDojo — tổng hợp lỗ hổng](docs/defectdojo/README.md)
+4. [ArgoCD — GitOps trên k3d](docs/argocd/README.md)
 
-```powershell
-docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml up -d gitlab-runner
-```
+## Dọn dẹp / rebuild
 
-## Create Runner Token
+Muốn bootstrap lại lab sạch (giữ image cache + volume MySQL), xem runbook an toàn tại [`docs/clean-rebuild/README.md`](docs/clean-rebuild/README.md). Runbook là thao tác **do người chạy thủ công theo checkpoint**, không auto-run lệnh phá dữ liệu.
 
-In GitLab UI:
+## Ghi chú tài nguyên
 
-1. Open `http://localhost:8929`.
-2. Login as `root`.
-3. Go to **Admin Area > CI/CD > Runners**.
-4. Create a new instance runner.
-5. Copy runner authentication token.
-
-## Register Runner
-
-Replace `<TOKEN>` with token from GitLab UI:
-
-```powershell
-.\scripts\gitlab-register-runner.ps1 -Token "<TOKEN>"
-```
-
-Verify runner appears online in GitLab UI.
-
-## Test Docker-in-Docker CI
-
-1. Create new blank project in GitLab.
-2. Copy files from `examples/gitlab-ci-dind/` into project root:
-   - `.gitlab-ci.yml`
-   - `Dockerfile`
-3. Commit files.
-4. Open **Build > Pipelines**.
-5. Confirm pipeline passes:
-   - `check-docker-client`
-   - `build-demo-image`
-
-Successful build proves GitLab Runner can run Docker-in-Docker jobs.
-
-## Stop Lab
-
-Stop containers but keep data:
-
-```powershell
-docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml down
-```
-
-Delete all GitLab and runner data:
-
-```powershell
-docker compose --env-file .env.gitlab -f docker-compose.gitlab.yml down
-Remove-Item -Recurse -Force .\gitlab, .\gitlab-runner
-```
-
-## Resource Notes
-
-This host has about 8GB RAM. Run GitLab phase first. Do not run Harbor, ArgoCD, Dependency-Track, and DefectDojo at the same time until GitLab is stable.
-
-## Next Phases
-
-- Harbor registry for CI image push.
-- Dependency-Track for SBOM and component risk.
-- DefectDojo for vulnerability aggregation.
-- ArgoCD for GitOps deployment.
+Host ~8GB RAM. Nếu bật cùng lúc quá nhiều stack: GitLab/Postgres restart, container OOM, pod kẹp `Pending`. Chạy đúng stack cho từng phase theo phụ lục docs tương ứng, tắt stack dư khi cần.

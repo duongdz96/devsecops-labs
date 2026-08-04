@@ -2,7 +2,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Token,
 
-  [string]$RunnerName = "vinfast-dind-runner"
+  [string]$RunnerName = "devsecops-dind-runner"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,14 +18,14 @@ Write-Host "Registering GitLab Runner '$RunnerName' for Docker-in-Docker jobs...
 docker @composeArgs exec gitlab-runner gitlab-runner register `
   --non-interactive `
   --url "http://gitlab:8929" `
+  --clone-url "http://gitlab:8929" `
   --token "$Token" `
   --executor "docker" `
   --docker-image "docker:24" `
   --docker-privileged `
+  --docker-network-mode "devsecops-labs-cicd" `
   --docker-volumes "/certs/client" `
   --docker-volumes "/cache" `
   --description "$RunnerName"
 
-Write-Host ""
-Write-Host "Runner registered. Current runner list:"
-docker @composeArgs exec gitlab-runner gitlab-runner list
+Write-Host "Runner registered. Verify status in GitLab Settings > CI/CD > Runners."

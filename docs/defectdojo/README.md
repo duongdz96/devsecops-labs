@@ -1,74 +1,61 @@
-# DefectDojo Lab
+# DefectDojo — Tổng hợp lỗ hổng
 
-DefectDojo adds vulnerability aggregation and reporting to this local CI/CD security lab.
+DefectDojo nhận báo cáo từ nhiều scanner, tổng hợp findings, cung cấp API cho CI import + fail gate.
 
-This lab uses:
+Lab chứng minh:
+
+```text
+GitLab CI (Trivy + Dependency-Check) -> DefectDojo import -> findings -> FAIL nếu HIGH/CRITICAL
+```
+
+## Thông số
 
 - DefectDojo UI/API: `http://localhost:8082`
-- PostgreSQL: container-only, persistent data under `defectdojo/postgres`
-- Valkey: Redis-compatible broker/result backend under `defectdojo/valkey`
-- GitLab CI target: `ci-cd` WordPress folder
-- Default product: `vinfast-wordpress`
-- Default engagement: `gitlab-ci`
+- Compose project: `devsecops-labs-dojo`
+- Docker network: `devsecops-labs-cicd`
+- App GitLab CI: `test-cicd/test_project`
+- DefectDojo product: `devsecops-wordpress`
+- Engagement: `gitlab-ci`
 
-## References
+## Yêu cầu
 
-- Official DefectDojo Docker Compose: <https://raw.githubusercontent.com/DefectDojo/django-DefectDojo/master/docker-compose.yml>
-- Official DefectDojo README: <https://raw.githubusercontent.com/DefectDojo/django-DefectDojo/master/README.md>
-- Official DefectDojo configuration docs: <https://docs.defectdojo.com/get_started/open_source/configuration/>
-- Import from API docs: <https://docs.defectdojo.com/import_data/import_scan_files/api_pipeline_modelling/>
+- Docker Desktop + Docker Compose plugin.
+- ~8GB RAM, 4 CPU.
+- GitLab đang chạy tại `http://localhost:8929`.
+- Cổng `8082` trống.
 
-## Requirements
+## Environment configuration
 
-- Docker Desktop or Docker Engine with Docker Compose plugin.
-- About 8GB RAM and 4 CPU.
-- GitLab already running at `http://localhost:8929`.
-- Ports available on host:
-  - DefectDojo HTTP: `8082`
+`.env.defectdojo` chứa cấu hình stack. Biến quan trọng:
 
-## Environment Configuration
-
-`.env.defectdojo` contains the stack configuration. Key variables:
-
-| Variable | Purpose |
+| Biến | Mục đích |
 | --- | --- |
-| `DD_SECRET_KEY` | Stable Django secret key. Keep unchanged after first boot. |
-| `DD_CREDENTIAL_AES_256_KEY` | Stable encryption key for credentials. Keep unchanged after first boot. |
-| `DD_DATABASE_URL` | PostgreSQL connection string. |
-| `DD_CELERY_BROKER_URL` | Valkey broker URL. |
-| `DD_CELERY_RESULT_BACKEND` | Valkey result backend URL. |
-| `DD_SITE_URL` | Public URL, default `http://localhost:8082`. |
-| `DD_ADMIN_USER` | Initial admin username, default `admin`. |
+| `DOJO_PORT` | Cổng host (mặc định `8082`). |
+| `DD_SECRET_KEY` | Django secret key. **Giữ ổn định sau boot đầu**. Đổi = stored credential đọc không được. |
+| `DD_CREDENTIAL_AES_256_KEY` | AES-256 key cho credentials. **Giữ ổn định**. |
+| `DD_DATABASE_URL` | PostgreSQL connection string (compose tự expand từ `DOJO_DATABASE_PASSWORD`). |
+| `DD_SITE_URL` | Public URL, mặc định `http://localhost:8082`. |
 
-Do not change `DD_SECRET_KEY` or `DD_CREDENTIAL_AES_256_KEY` after first boot unless you intentionally reset the lab data.
+Không đổi `DD_SECRET_KEY` hay `DD_CREDENTIAL_AES_256_KEY` sau lần boot đầu trừ khi reset toàn bộ lab.
 
 ## Start DefectDojo
-
-From repository root:
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml up -d
 ```
 
-Check status:
+Check:
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml ps
-```
-
-Follow initializer logs:
-
-```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml logs -f dojo-initializer
 ```
 
-First boot can take several minutes while migrations and initialization run.
+Boot đầu mất vài phút (migrations + initialization).
 
-## Get Admin Password
+## Lấy admin password
 
-DefectDojo generates the admin password during initialization.
-
-Run:
+DefectDojo sinh admin password trong initializer logs:
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml logs dojo-initializer | Select-String "Admin password:"
@@ -79,85 +66,84 @@ Login:
 ```text
 URL: http://localhost:8082
 Username: admin
-Password: value printed in initializer logs
+Password: giá trị trong initializer logs
 ```
 
-Change admin password after first login.
+Đổi admin password sau lần login đầu.
 
-## Create API Token
+Nếu data đã init trước, password có thể không in ra nữa. Lúc đó dùng DefectDojo password reset hoặc reset lab data.
 
-In DefectDojo UI:
+## Tạo API Token
 
-1. Login as `admin`.
-2. Open user menu.
-3. Open **API v2 Key** or user API token page.
-4. Copy API token.
+Trong DefectDojo UI:
 
-Store API token only in GitLab CI/CD variables. Do not commit API tokens into repo files.
+1. Login `admin`.
+2. Mở user menu → **API v2 Key**.
+3. Copy token.
 
-## GitLab CI Variables
+Lưu token chỉ trong GitLab CI/CD variables, không commit.
 
-In GitLab project for `ci-cd`, open **Settings > CI/CD > Variables** and add:
+## GitLab CI variables
+
+Trong project `test-cicd/test_project`, **Settings > CI/CD > Variables**:
 
 | Variable | Value |
 | --- | --- |
 | `DEFECTDOJO_URL` | `http://host.docker.internal:8082` |
-| `DEFECTDOJO_API_KEY` | API token from DefectDojo |
-| `DEFECTDOJO_PRODUCT_NAME` | `vinfast-wordpress` |
+| `DEFECTDOJO_API_KEY` | API token từ DefectDojo |
+| `DEFECTDOJO_PRODUCT_NAME` | `devsecops-wordpress` |
 | `DEFECTDOJO_ENGAGEMENT_NAME` | `gitlab-ci` |
 | `DEFECTDOJO_MIN_SEVERITY` | `High` |
 
-Use `http://host.docker.internal:8082` on Docker Desktop so GitLab Runner job containers can reach the host-published DefectDojo port.
+Dùng `host.docker.internal:8082` trên Docker Desktop để runner job container reach được host-published port.
 
-If runner job containers are attached to Docker network `vinfast-cicd-lab`, `DEFECTDOJO_URL` may be set to:
+Nếu runner job container nằm trên Docker network `devsecops-labs-cicd`, có thể dùng service name:
 
 ```text
 http://dojo-nginx:8080
 ```
 
-## CI Behavior
+## Hành vi CI
 
-File `ci-cd/.gitlab-ci.yml` contains these DefectDojo jobs:
+`.gitlab-ci.yml` trong `test_project` có jobs:
 
 - `trivy-fs-scan`
 - `dependency-check-scan`
 - `defectdojo-import`
 
-Trivy job:
+### Trivy
 
-1. Runs filesystem scan against repository contents.
-2. Writes `trivy-fs-report.json`.
-3. Saves report as artifact.
-4. Does not fail before import, so DefectDojo receives the report.
+1. Filesystem scan toàn bộ repo contents.
+2. Ghi `trivy-fs-report.json`.
+3. Lưu artifact.
+4. Không fail trước import → DefectDojo nhận được report.
 
-Dependency-Check job:
+### Dependency-Check
 
-1. Runs OWASP Dependency-Check against repository contents.
-2. Writes `dependency-check-report.json`.
-3. Saves report as artifact.
-4. Does not fail before import, so DefectDojo receives the report.
+1. OWASP Dependency-Check scan repo contents.
+2. Ghi `dependency-check-report.json`.
+3. Lưu artifact.
+4. Không fail trước import.
 
-DefectDojo import job:
+### DefectDojo import
 
-1. Downloads scanner artifacts.
-2. Calls `POST /api/v2/reimport-scan/`.
-3. Imports Trivy report as scan type `Trivy Scan`.
-4. Imports Dependency-Check report as scan type `Dependency Check Scan`.
-5. Uses `auto_create_context=true` to create product/engagement if missing.
-6. Fails after imports if either report contains `HIGH` or `CRITICAL` findings.
+1. Download scanner artifacts.
+2. `POST /api/v2/reimport-scan/`.
+3. Import Trivy report: scan type `Trivy Scan`.
+4. Import Dependency-Check report: scan type `Dependency Check Scan`.
+5. `auto_create_context=true` tạo product/engagement nếu chưa có.
+6. FAIL nếu có `HIGH` hoặc `CRITICAL` findings.
 
-## Fail Gate
+## Fail gate
 
-Pipeline imports reports into DefectDojo first, then fails when either scanner reports any:
+Pipeline import reports trước, rồi fail khi scanner báo:
 
 - `CRITICAL` finding
 - `HIGH` finding
 
-Reports are kept as artifacts even when the gate fails, and DefectDojo receives reports before failure.
+Reports giữ lại artifact ngay cả khi gate fail. DefectDojo nhận reports trước khi fail.
 
-## Verify Locally
-
-Validate Compose config:
+## Verify locally
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml config
@@ -169,107 +155,83 @@ Check UI:
 Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:8082"
 ```
 
-Expected:
+Expected: config command exit 0, UI HTTP 200, browser mở được `http://localhost:8082`.
 
-- Compose config command exits 0.
-- UI request returns HTTP 200.
-- Browser can open `http://localhost:8082`.
+## Verify từ GitLab CI
 
-## Verify from GitLab CI
-
-1. Push or copy `ci-cd/.gitlab-ci.yml` into GitLab project for `ci-cd`.
-2. Configure GitLab CI variables listed above.
+1. Commit `.gitlab-ci.yml` vào `test-cicd/test_project`.
+2. Config CI variables.
 3. Run pipeline.
-4. Confirm artifacts exist:
-   - `trivy-fs-report.json`
-   - `dependency-check-report.json`
-5. Open DefectDojo UI.
-6. Open product `vinfast-wordpress`.
-7. Open engagement `gitlab-ci`.
-8. Confirm imported tests/findings exist.
-9. Confirm pipeline gate result matches `HIGH` and `CRITICAL` findings.
+4. Xác nhận artifacts: `trivy-fs-report.json`, `dependency-check-report.json`.
+5. Mở DefectDojo UI → product `devsecops-wordpress` → engagement `gitlab-ci`.
+6. Confirm imported tests/findings.
+7. Confirm gate result khớp `HIGH`/`CRITICAL` findings.
 
 ## Stop DefectDojo
 
-Stop containers but keep data:
+Giữ dữ liệu:
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml down
 ```
 
-Delete all DefectDojo data:
+Xóa hết:
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml down
 Remove-Item -Recurse -Force .\defectdojo
 ```
 
-## Resource Notes
+## Ghi chú tài nguyên
 
-This host has about 8GB RAM. Keep DefectDojo separate from GitLab and Dependency-Track so it can be stopped when not importing findings.
+~8GB RAM. DefectDojo tách khỏi GitLab để tắt khi không import findings.
 
-Dependency-Check can be slow and memory-heavy. First run downloads vulnerability data and may take significant time.
+Dependency-Check chạy chậm, tốn memory. Lần đầu download vulnerability data, có thể lâu.
 
-If memory pressure appears:
+If memory căng:
 
-1. Stop unused services.
-2. Start only GitLab and DefectDojo for import testing.
-3. Avoid running Harbor, ArgoCD, DefectDojo, and Dependency-Track all at once until host resources are increased.
+1. Stop stack không dùng.
+2. Chạy GitLab + DefectDojo cho import test.
+3. Không chạy Harbor + ArgoCD + DefectDojo + Dependency-Track đồng loạt.
 
 ## Troubleshooting
 
-### UI cannot open
-
-Check status:
+### UI không mở
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml ps
-```
-
-Follow logs:
-
-```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml logs -f dojo-uwsgi dojo-nginx
 ```
 
-### Admin password not visible
-
-Read initializer logs:
+### Admin password không thấy
 
 ```powershell
 docker compose --env-file .env.defectdojo -f docker-compose.defectdojo.yml logs dojo-initializer | Select-String "Admin password:"
 ```
 
-If data was already initialized, password may not print again. Use DefectDojo password reset flow or reset lab data.
+### GitLab CI không reach DefectDojo
 
-### GitLab CI cannot reach DefectDojo
-
-Use this GitLab CI variable on Docker Desktop:
+Docker Desktop:
 
 ```text
 DEFECTDOJO_URL=http://host.docker.internal:8082
 ```
 
-If using shared Docker network access, attach runner job containers to `vinfast-cicd-lab` and use:
+Shared network `devsecops-labs-cicd`:
 
 ```text
 DEFECTDOJO_URL=http://dojo-nginx:8080
 ```
 
-### Import fails
+### Import fail
 
 Check:
 
-- `DEFECTDOJO_API_KEY` is correct.
-- `DEFECTDOJO_URL` is reachable from CI job container.
-- Scan type names are exactly `Trivy Scan` and `Dependency Check Scan`.
-- API token has permission to import scans.
+- `DEFECTDOJO_API_KEY` đúng.
+- `DEFECTDOJO_URL` reachable từ CI job container.
+- Scan type names chính xác: `Trivy Scan`, `Dependency Check Scan`.
+- Token có permission import scans.
 
-### Pipeline fails on HIGH or CRITICAL findings
+### Pipeline fail vì HIGH/CRITICAL
 
-Open DefectDojo UI:
-
-1. Open product `vinfast-wordpress`.
-2. Open engagement `gitlab-ci`.
-3. Review findings.
-4. Fix vulnerable components or mark findings false positive only after validation.
+Mở DefectDojo UI → product `devsecops-wordpress` → engagement `gitlab-ci` → review findings. Fix component hoặc mark false positive sau khi verified.

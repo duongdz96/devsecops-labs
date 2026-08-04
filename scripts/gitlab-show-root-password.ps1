@@ -6,7 +6,7 @@ $composeArgs = @(
   "-f", "docker-compose.gitlab.yml"
 )
 
-Write-Host "Reading initial root password from vinfast-gitlab..."
+Write-Host "Reading initial root password from the GitLab service..."
 docker @composeArgs exec gitlab bash -lc "test -f /etc/gitlab/initial_root_password && sed -n 's/^Password: //p' /etc/gitlab/initial_root_password"
 
 Write-Host ""

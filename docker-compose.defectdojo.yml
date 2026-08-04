@@ -1,7 +1,8 @@
+name: devsecops-labs-dojo
+
 services:
   dojo-postgres:
     image: ${DOJO_POSTGRES_IMAGE}
-    container_name: vinfast-dojo-postgres
     restart: unless-stopped
     environment:
       PGDATA: /var/lib/postgresql/data
@@ -20,7 +21,6 @@ services:
 
   dojo-valkey:
     image: ${DOJO_VALKEY_IMAGE}
-    container_name: vinfast-dojo-valkey
     restart: unless-stopped
     volumes:
       - "${DOJO_VALKEY_DIR}:/data"
@@ -34,7 +34,6 @@ services:
 
   dojo-initializer:
     image: ${DOJO_DJANGO_IMAGE}
-    container_name: vinfast-dojo-initializer
     restart: "no"
     depends_on:
       - dojo-postgres
@@ -46,12 +45,13 @@ services:
     environment:
       DD_DATABASE_HOST: ${DD_DATABASE_HOST}
       DD_DATABASE_PORT: ${DD_DATABASE_PORT}
-      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_DATABASE_URL: postgresql://${DOJO_DATABASE_USER}:${DOJO_DATABASE_PASSWORD}@${DD_DATABASE_HOST}:${DD_DATABASE_PORT}/${DOJO_DATABASE_NAME}
       DD_SECRET_KEY: ${DD_SECRET_KEY}
       DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY}
       DD_DATABASE_READINESS_TIMEOUT: ${DD_DATABASE_READINESS_TIMEOUT}
       DD_INITIALIZE: ${DD_INITIALIZE}
       DD_ADMIN_USER: ${DD_ADMIN_USER}
+      DD_ADMIN_PASSWORD: ${DD_ADMIN_PASSWORD}
       DD_ADMIN_MAIL: ${DD_ADMIN_MAIL}
       DD_ADMIN_FIRST_NAME: ${DD_ADMIN_FIRST_NAME}
       DD_ADMIN_LAST_NAME: ${DD_ADMIN_LAST_NAME}
@@ -60,7 +60,6 @@ services:
 
   dojo-uwsgi:
     image: ${DOJO_DJANGO_IMAGE}
-    container_name: vinfast-dojo-uwsgi
     restart: unless-stopped
     depends_on:
       dojo-initializer:
@@ -82,7 +81,7 @@ services:
       DD_SITE_URL: ${DD_SITE_URL}
       DD_DATABASE_HOST: ${DD_DATABASE_HOST}
       DD_DATABASE_PORT: ${DD_DATABASE_PORT}
-      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_DATABASE_URL: postgresql://${DOJO_DATABASE_USER}:${DOJO_DATABASE_PASSWORD}@${DD_DATABASE_HOST}:${DD_DATABASE_PORT}/${DOJO_DATABASE_NAME}
       DD_CELERY_BROKER_URL: ${DD_CELERY_BROKER_URL}
       DD_CELERY_RESULT_BACKEND: ${DD_CELERY_RESULT_BACKEND}
       DD_SECRET_KEY: ${DD_SECRET_KEY}
@@ -100,7 +99,6 @@ services:
 
   dojo-celeryworker:
     image: ${DOJO_DJANGO_IMAGE}
-    container_name: vinfast-dojo-celeryworker
     restart: unless-stopped
     depends_on:
       dojo-initializer:
@@ -119,7 +117,7 @@ services:
     environment:
       DD_DATABASE_HOST: ${DD_DATABASE_HOST}
       DD_DATABASE_PORT: ${DD_DATABASE_PORT}
-      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_DATABASE_URL: postgresql://${DOJO_DATABASE_USER}:${DOJO_DATABASE_PASSWORD}@${DD_DATABASE_HOST}:${DD_DATABASE_PORT}/${DOJO_DATABASE_NAME}
       DD_CELERY_BROKER_URL: ${DD_CELERY_BROKER_URL}
       DD_CELERY_RESULT_BACKEND: ${DD_CELERY_RESULT_BACKEND}
       DD_SECRET_KEY: ${DD_SECRET_KEY}
@@ -132,7 +130,6 @@ services:
 
   dojo-celerybeat:
     image: ${DOJO_DJANGO_IMAGE}
-    container_name: vinfast-dojo-celerybeat
     restart: unless-stopped
     depends_on:
       dojo-initializer:
@@ -151,7 +148,7 @@ services:
     environment:
       DD_DATABASE_HOST: ${DD_DATABASE_HOST}
       DD_DATABASE_PORT: ${DD_DATABASE_PORT}
-      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_DATABASE_URL: postgresql://${DOJO_DATABASE_USER}:${DOJO_DATABASE_PASSWORD}@${DD_DATABASE_HOST}:${DD_DATABASE_PORT}/${DOJO_DATABASE_NAME}
       DD_CELERY_BROKER_URL: ${DD_CELERY_BROKER_URL}
       DD_CELERY_RESULT_BACKEND: ${DD_CELERY_RESULT_BACKEND}
       DD_SECRET_KEY: ${DD_SECRET_KEY}
@@ -162,7 +159,6 @@ services:
 
   dojo-nginx:
     image: ${DOJO_NGINX_IMAGE}
-    container_name: vinfast-dojo-nginx
     restart: unless-stopped
     depends_on:
       dojo-uwsgi:
@@ -180,4 +176,5 @@ services:
 
 networks:
   cicd-lab:
-    name: vinfast-cicd-lab
+    external: true
+    name: devsecops-labs-cicd
