@@ -41,3 +41,5 @@ Thumbs.db
 
 # Local reset snapshots; never source-of-truth
 /backup/
+
+/docs/
