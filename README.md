@@ -194,38 +194,6 @@ Each function uses a separate least-privilege robot account:
 - release promoter: Pull on candidate, Pull + Push on release;
 - k3d robot: Pull only on release.
 
-## How GitOps and ArgoCD work
-
-The GitOps repository does not build images. It selects a release artifact through the `image` field in the Kubernetes Deployment:
-
-```yaml
-image: host.docker.internal:8083/devsecops-lab/wordpress@sha256:<digest>
-```
-
-The YAML manifests also describe:
-
-- WordPress and MySQL Deployments;
-- Services and internal DNS;
-- persistent storage for MySQL;
-- health probes;
-- CPU and memory requests and limits;
-- references to Kubernetes Secrets;
-- the ArgoCD source repository, branch, and manifest path.
-
-ArgoCD continuously compares the desired state in Git with the actual cluster state. When Git changes, ArgoCD syncs the workload. When someone changes the cluster directly, `selfHeal` restores the declared state.
-
-The release digest is currently updated through a controlled manual step:
-
-```text
-promote-release
-→ read RELEASE_IMAGE from release.env
-→ update the GitOps manifest
-→ commit and push the GitOps repository
-→ ArgoCD syncs
-```
-
-The pipeline does not yet commit a new digest to the GitOps repository automatically.
-
 ## Artifact traceability
 
 The artifact can be traced across the full system:
@@ -250,19 +218,3 @@ Primary evidence sources:
 - ArgoCD Application status;
 - the Kubernetes Deployment and pod `imageID`.
 
-## Lab limitations
-
-- Harbor uses HTTP as an insecure registry.
-- GitLab Runner uses privileged Docker-in-Docker.
-- Kubernetes Secrets are bootstrapped outside Git.
-- GitOps digest updates are not automated.
-- Image signing, admission verification, and SLSA provenance are not integrated.
-- The lab bypass tests deployment flow only; it does not replace remediation.
-
-## Detailed documentation
-
-- [Harbor registry and artifact promotion](docs/harbor/README.md)
-- [Dependency-Track and SBOMs](docs/dependency-track/README.md)
-- [DefectDojo and finding aggregation](docs/defectdojo/README.md)
-- [ArgoCD and GitOps on k3d](docs/argocd/README.md)
-- [Clean rebuild runbook](docs/clean-rebuild/README.md)
