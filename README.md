@@ -13,8 +13,6 @@ Lab objectives:
 - deploy releases through GitOps with ArgoCD and k3d;
 - trace a running image back to its Git commit.
 
-> This is a learning environment on a personal machine, not a production-ready configuration.
-
 ## Architecture overview
 
 ```text
